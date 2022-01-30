@@ -1,0 +1,222 @@
+---
+title: 'NLP: Political comments'
+output:
+  html_document:
+    df_print: paged
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+## Presentation
+
+We can place ourselves in a situation where the government would like to
+follow political trends and find out if the population has a positive
+opinion on the country's politics.
+
+The dataset consists of comments on Danish political articles on social
+media. The comments have a positive or negative score depending on their
+content. It would then be interesting to be able to make a model that
+would automatically classify (positive or negative) comments.
+
+## Load Library
+
+```{r}
+library(text2vec)
+library(data.table)
+library(magrittr)
+library(stopwords)
+```
+
+## Load dataset
+
+```{r}
+Corpus <- read.csv("C:/Users/adrie/OneDrive/Documents/sem9/NLP/all_sentences.csv", header = FALSE)
+colnames(Corpus) <- c('sentiment','text')
+Corpus
+```
+
+## Data Processes
+
+Preprocess the data, transform the sentiment in two categories
+
+```{r}
+Corpus <- Corpus[Corpus$sentiment != 0,]
+Corpus$id <- seq.int(nrow(Corpus))
+for(i in 1:length(Corpus$sentiment)) {
+  if(Corpus$sentiment[i]<=0){
+    Corpus$sentiment[i]=0
+  }
+  if(Corpus$sentiment[i]>0){
+    Corpus$sentiment[i]=1
+  }
+}
+Corpus
+```
+
+Prepare a train and test put to lower case
+
+```{r}
+for(i in 1:length(Corpus$text)) {
+    Corpus$text[i]= gsub('[[:punct:] ]+',' ',tolower(Corpus$text[i]))
+}
+Corpus
+```
+
+Split in training and test sample
+
+```{r}
+
+  
+training_samples = nrow(Corpus)*0.80
+validation_samples = nrow(Corpus)*0.20
+
+indices = sample(1:nrow(Corpus))
+training_indices = indices[1:training_samples]
+validation_indices = indices[(training_samples + 1): (training_samples + validation_samples)]
+
+train = Corpus[training_indices,]
+test = Corpus[validation_indices,]
+nrow(train)
+```
+
+Define the word tokenizer
+
+```{r}
+prep_fun = tolower
+tok_fun = word_tokenizer
+```
+
+Tokenize commnts into words
+
+```{r}
+it_train = itoken(train$text, 
+                  preprocessor = prep_fun, 
+                  tokenizer = tok_fun, 
+                  ids = train$id, 
+                  progressbar = FALSE)
+
+stop_words = stopwords::stopwords("da") # danish stop words
+vocab = create_vocabulary(it_train,stopwords = stop_words)
+train_tokens = tok_fun(prep_fun(train$text))
+
+it_train = itoken(train_tokens, 
+                  ids = train$id,
+                  # turn off progressbar because it won't look nice in rmd
+                  progressbar = FALSE)
+it_train
+```
+
+Vectorize the vocab: We obtain our dgcMatrix. Now we can use it rto
+train our model
+
+```{r}
+vectorizer = vocab_vectorizer(vocab)
+t1 = Sys.time()
+dtm_train = create_dtm(it_train, vectorizer)
+print(difftime(Sys.time(), t1, units = 'sec'))
+```
+
+## Build and train the model
+
+Here we will use the glmnet package to fit a logistic regression model
+with an L1 penalty and 10 fold cross-validation.
+
+```{r}
+library(glmnet)
+NFOLDS = 10
+t1 = Sys.time()
+glmnet_classifier = cv.glmnet(x = dtm_train, y = train[['sentiment']], 
+                              family = 'binomial', 
+                              # L1 penalty
+                              alpha = 1,
+                              # interested in the area under ROC curve
+                              type.measure = "auc",
+                              # 5-fold cross-validation
+                              nfolds = NFOLDS,
+                              # high value is less accurate, but has faster training
+                              thresh = 1e-3,
+                              # again lower number of iterations for faster training
+                              maxit = 1e3)
+```
+
+```{r}
+print(difftime(Sys.time(), t1, units = 'sec'))
+```
+
+## Evaluate the model
+
+We are going to plot the roc curve to see our accuracy
+
+```{r}
+plot(glmnet_classifier)
+```
+
+Check the air under the curve metric
+
+```{r}
+print(paste("max AUC =", round(max(glmnet_classifier$cvm), 4)))
+```
+
+```{r}
+# Note that most text2vec functions are pipe friendly!
+it_test = tok_fun(prep_fun(test$text))
+# turn off progressbar because it won't look nice in rmd
+it_test = itoken(it_test, ids = test$id, progressbar = FALSE)
+```
+
+Test our model with the test data
+
+```{r}
+dtm_test = create_dtm(it_test, vectorizer)
+preds = predict(glmnet_classifier, dtm_test, type = 'response')[,1]
+glmnet:::auc(test$sentiment, preds)
+```
+
+As we can see, performance on the test data is roughly the same as we
+expect from cross-validation
+
+## Try with TF-IDF
+
+```{r}
+vocab = create_vocabulary(it_train)
+vectorizer = vocab_vectorizer(vocab)
+dtm_train = create_dtm(it_train, vectorizer)
+
+# define tfidf model
+tfidf = TfIdf$new()
+# fit model to train data and transform train data with fitted model
+dtm_train_tfidf = fit_transform(dtm_train, tfidf)
+
+# apply pre-trained tf-idf transformation to test data
+dtm_test_tfidf = create_dtm(it_test, vectorizer)
+dtm_test_tfidf = transform(dtm_test_tfidf, tfidf)
+```
+
+```{r}
+t1 = Sys.time()
+glmnet_classifier = cv.glmnet(x = dtm_train_tfidf, y = train[['sentiment']], 
+                              family = 'binomial', 
+                              alpha = 1,
+                              type.measure = "auc",
+                              nfolds = 10,
+                              thresh = 1e-3,
+                              maxit = 1e3)
+print(difftime(Sys.time(), t1, units = 'sec'))
+```
+
+```{r}
+plot(glmnet_classifier)
+```
+
+```{r}
+print(paste("max AUC =", round(max(glmnet_classifier$cvm), 4)))
+```
+
+```{r}
+preds = predict(glmnet_classifier, dtm_test_tfidf, type = 'response')[,1]
+glmnet:::auc(test$sentiment, preds)
+confusion_matrix <- ftable(test$sentiment, preds)
+accuracy <- 100* (sum(diag(confusion_matrix)) / length(preds))
+accuracy
+```

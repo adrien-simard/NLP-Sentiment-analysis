@@ -1,0 +1,205 @@
+---
+title: "Political Comments Nural Network"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+# Neural Network
+## Load libraries
+```{r}
+
+library(dplyr)
+library(ggplot2)
+library(purrr)
+library(keras)
+
+```
+
+
+## Load dataset
+
+The dataset was created specifically to classify sentences to the root comments of Danish political articles on social media.
+
+<https://github.com/steffan267/Sentiment-Analysis-on-Danish-Social-Media/blob/master/all_sentences.csv>
+
+```{r}
+df <- read.csv("C:/Users/adrie/OneDrive/Documents/sem9/NLP/all_sentences.csv", header=FALSE,encoding='UTF-8')
+colnames(df) <- c('tag','text')
+df
+```
+
+## Preprocess data
+
+**Preprocess the data, transform the tag in two categories**
+
+```{r}
+df <- df[df$tag != 0,]
+df$id <- seq.int(nrow(df))
+for(i in 1:length(df$tag)) {
+  if(df$tag[i]<=0){
+    df$tag[i]=0
+  }
+  if(df$tag[i]>0){
+    df$tag[i]=1
+  }
+}
+
+```
+
+**Remove the punctuation**
+
+```{r}
+for(i in 1:length(df$text)) {
+    df$text[i]= gsub('[[:punct:] ]+',' ',tolower(df$text[i]))
+}
+df
+```
+
+**define the training and test set**
+
+```{r}
+training_id <- sample.int(nrow(df), size = nrow(df)*0.8)
+training <- df[training_id,]
+testing <- df[-training_id,]
+```
+
+```{r}
+df$text %>% 
+  strsplit(" ") %>% 
+  sapply(length) %>% 
+  summary()
+
+```
+
+```{r}
+num_words <- 10000
+max_length <- 50
+text_vectorization <- layer_text_vectorization(
+  max_tokens = 10000, 
+  output_sequence_length = 50, 
+)
+```
+
+take the string input and convert it to a Tensor
+
+```{r}
+text_vectorization %>% 
+  adapt(df$text)
+text_vectorization
+```
+
+```{r}
+get_vocabulary(text_vectorization)
+```
+
+we can see our tensor now
+
+```{r}
+text_vectorization(matrix(df$text[1], ncol = 1))
+```
+
+## Build the Model
+
+we build a model with a hidden layer with 32 units and the relu actication function. In the output layer we use the sigmoid function.
+
+```{r}
+input <- layer_input(shape = c(1), dtype = "string")
+
+output <- input %>% 
+  text_vectorization() %>% 
+  layer_embedding(input_dim = num_words + 1, output_dim = 32) %>%
+  layer_global_average_pooling_1d() %>%
+  layer_dense(units = 32, activation = "relu") %>%
+  layer_dropout(0.5) %>% 
+  layer_dense(units = 1, activation = "sigmoid")
+
+model <- keras_model(input, output)
+
+```
+
+We configure the model to choose an optimizer and a loss function
+
+```{r}
+model %>% compile(
+  optimizer = 'adam',
+  loss = 'binary_crossentropy',
+  metrics = list('accuracy')
+)
+```
+
+## Train the model
+
+```{r}
+history <- model %>% fit(
+  training$text,
+  as.numeric(training$tag == 1),
+  epochs = 60,
+  batch_size = 512,
+  validation_split = 0.2,
+  verbose=2
+)
+```
+
+## Evaluate the model
+
+```{r}
+results <- model %>% evaluate(testing$text, as.numeric(testing$tag == 1), verbose = 1)
+results
+```
+
+```{r}
+plot(history)
+```
+
+## Try with more hidden layer
+
+```{r}
+input <- layer_input(shape = c(1), dtype = "string")
+
+output <- input %>% 
+  text_vectorization() %>% 
+  layer_embedding(input_dim = num_words + 1, output_dim = 16) %>%
+  
+  layer_global_average_pooling_1d() %>%
+  layer_dense(units = 16, activation = "relu") %>%
+  layer_dense(units = 16, activation = "relu") %>%
+  layer_dropout(0.5) %>% 
+  layer_dense(units = 1, activation = "sigmoid")
+
+model <- keras_model(input, output)
+
+```
+
+```{r}
+model %>% compile(
+  optimizer = 'adam',
+  loss = 'binary_crossentropy',
+  metrics = list('accuracy')
+)
+```
+
+```{r}
+history <- model %>% fit(
+  training$text,
+  as.numeric(training$tag == 1),
+  epochs = 80,
+  batch_size = 512,
+  validation_split = 0.2,
+  verbose=2
+)
+```
+
+```{r}
+results <- model %>% evaluate(testing$text, as.numeric(testing$tag == 1), verbose = 1)
+results
+```
+
+```{r}
+plot(history)
+```
+
+## Conclusion
+
+We can see our loss validation curve going up after going down (it begin at 50 iterations) . We can conclude that our model is to complex with one more hidden layer and it creates over fitting. So the best model in this case is the first one with only one hidden layer with 32 units.
