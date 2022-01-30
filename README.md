@@ -6,5 +6,6 @@ The dataset consists of comments on Danish political articles on social media. T
 # Run the program
 We have two R notebooks: 
 - The first contain the linear Regression
-- the second the Neural network 
+- the second the Neural network.
+
 To run the code only you need to install the required packages and run the entire notebook
