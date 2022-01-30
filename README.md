@@ -8,4 +8,6 @@ We have two R notebooks:
 - The first contain the linear Regression
 - the second the Neural network.
 
-To run the code only you need to install the required packages and run the entire notebook
+To run the code: 
+- You need to install the required packages and run the entire notebook.
+- Put the path to the file all_sentences.csv in the read.csv() like this =>  Corpus <- read.csv("C:/Users/adrie/OneDrive/Documents/sem9/NLP/all_sentences.csv", header = FALSE)
